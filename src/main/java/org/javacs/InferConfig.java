@@ -8,8 +8,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
 
 class InferConfig {
     private static final Logger LOG = Logger.getLogger("main");
@@ -61,6 +70,12 @@ class InferConfig {
                 result.add(found);
             }
             return result;
+        }
+
+        // Eclipse
+        var classPath = workspaceRoot.resolve(".classpath");
+        if (Files.exists(classPath)) {
+            return eclipseClasspath(classPath);
         }
 
         // Maven
@@ -252,6 +267,33 @@ class InferConfig {
         var absolute = new HashSet<Path>();
         for (var relative : bazelAQuery(bazelWorkspaceRoot, "Javac", "--classpath")) {
             absolute.add(bazelWorkspaceRoot.resolve(relative));
+        }
+        return absolute;
+    }
+
+    private Set<Path> eclipseClasspath(Path classPathPath) {
+        var absolute = new HashSet<Path>();
+        try {
+            File f = new File(classPathPath.toString());
+            DocumentBuilderFactory xmlFactory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder xmlBuilder = xmlFactory.newDocumentBuilder();
+            Document doc = xmlBuilder.parse(f);
+            XPathFactory xPathfactory = XPathFactory.newInstance();
+            XPath xpath = xPathfactory.newXPath();
+            XPathExpression expr = xpath.compile(
+                    "/classpath/classpathentry[@kind='lib']/@path");
+            NodeList nodes = (NodeList)expr.evaluate(doc, XPathConstants.NODESET);
+
+            Path classPathDir = classPathPath.getParent();
+            for (int i = 0; i < nodes.getLength(); i++) {
+                String relPath = nodes.item(i).getNodeValue();
+                if (relPath == null) {
+                    continue;
+                }
+                absolute.add(classPathDir.resolve(Paths.get(relPath)).toAbsolutePath());
+            }
+        } catch(Exception exc) {
+            LOG.log(Level.INFO, exc.getMessage(), exc);
         }
         return absolute;
     }
